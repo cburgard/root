@@ -1257,10 +1257,18 @@ namespace HistFactory{
     RooArgSet likelihoodTerms("likelihoodTerms"), constraintTerms("constraintTerms");
     vector<string> likelihoodTermNames, constraintTermNames, totSystTermNames, syst_x_expectedPrefixNames, normalizationNames;
 
-    vector< pair<string,string> >   statNamePairs;
-    vector< pair<TH1*,TH1*> >       statHistPairs; // <nominal, error>
-    std::string                     statFuncName; // the name of the ParamHistFunc
-    std::string                     statNodeName; // the name of the McStat Node
+    struct StatConfig {
+      vector< pair<TH1*,TH1*> >       statHistPairs; // <nominal, error>
+      std::string                     statFuncName; // the name of the ParamHistFunc
+      std::string                     statNodeName; // the name of the McStat Node
+      ~StatConfig(){
+        // clean stat hist pair (need to delete second histogram)
+        for (unsigned int i = 0; i < statHistPairs.size() ; ++i ) delete statHistPairs[i].second;
+        statHistPairs.clear();
+      }
+    };
+    std::map<std::string,StatConfig> statConfigs;
+
     // Constraint::Type statConstraintType=Constraint::Gaussian;
     // Double_t                        statRelErrorThreshold=0.0;
 
@@ -1361,7 +1369,7 @@ namespace HistFactory{
         } else {
           stat_err_contrib_name = channel_name;
         }
-        
+       
 	if( fObsNameVec.size() > 3 ) {
 	  std::cout << "Cannot include Stat Error for histograms of more than 3 dimensions." 
 		    << std::endl; 
@@ -1434,7 +1442,7 @@ namespace HistFactory{
 	
 	  // Save the nominal and error hists
 	  // for the building of constraint terms
-	  statHistPairs.push_back( pair<TH1*,TH1*>(nominal, statErrorHist) );
+          statConfigs[stat_err_contrib_name].statHistPairs.push_back( pair<TH1*,TH1*>(nominal, statErrorHist) );
 
 	  // To do the 'conservative' version, we would need to do some
 	  // intervention here.  We would probably need to create a different
@@ -1451,8 +1459,8 @@ namespace HistFactory{
 	  // Next, try to get the ParamHistFunc (it may have been 
 	  // created by another sample in this channel)
 	  // or create it if it doesn't yet exist:
-	  statFuncName = "mc_stat_" + stat_err_contrib_name;
-	  ParamHistFunc* paramHist = (ParamHistFunc*) proto->function( statFuncName.c_str() );
+          statConfigs[stat_err_contrib_name].statFuncName = "mc_stat_" + stat_err_contrib_name;
+	  ParamHistFunc* paramHist = (ParamHistFunc*) proto->function( statConfigs[stat_err_contrib_name].statFuncName.c_str() );
 	  if( paramHist == NULL ) {
 
 	    // Get a RooArgSet of the observables:
@@ -1473,22 +1481,22 @@ namespace HistFactory{
 									observables, 
 									gammaMin, gammaMax);
 
-	    ParamHistFunc statUncertFunc(statFuncName.c_str(), statFuncName.c_str(), 
+	    ParamHistFunc statUncertFunc(statConfigs[stat_err_contrib_name].statFuncName.c_str(), statConfigs[stat_err_contrib_name].statFuncName.c_str(), 
 					 observables, statFactorParams );
 	  
 	    proto->import( statUncertFunc, RecycleConflictNodes() );
 
-	    paramHist = (ParamHistFunc*) proto->function( statFuncName.c_str() );
+	    paramHist = (ParamHistFunc*) proto->function( statConfigs[stat_err_contrib_name].statFuncName.c_str() );
 
 	  } // END: If Statement: Create ParamHistFunc
 	
 	  // Create the node as a product
 	  // of this function and the 
 	  // expected value from MC
-	  statNodeName = sample.GetName() + "_" + stat_err_contrib_name + "_overallSyst_x_StatUncert";
+          statConfigs[stat_err_contrib_name].statNodeName = sample.GetName() + "_" + stat_err_contrib_name + "_overallSyst_x_StatUncert";
 	
 	  RooAbsReal* expFunc = (RooAbsReal*) proto->function( syst_x_expectedPrefix.c_str() );
-	  RooProduct nodeWithMcStat(statNodeName.c_str(), statNodeName.c_str(),
+	  RooProduct nodeWithMcStat(statConfigs[stat_err_contrib_name].statNodeName.c_str(), statConfigs[stat_err_contrib_name].statNodeName.c_str(),
 				    RooArgSet(*paramHist, *expFunc) );
 	
 	  proto->import( nodeWithMcStat, RecycleConflictNodes() );
@@ -1742,20 +1750,21 @@ namespace HistFactory{
 
     // If a non-zero number of samples call for
     // Stat Uncertainties, create the statFactor functions
-    if( statHistPairs.size() > 0 ) {
-      
-      // Create the histogram of (binwise)
-      // stat uncertainties:
-      TH1* fracStatError = MakeScaledUncertaintyHist( statNodeName + "_RelErr", statHistPairs ); 
-      if( fracStatError == NULL ) {
-	std::cout << "Error: Failed to make ScaledUncertaintyHist for: " 
-		  << statNodeName << std::endl;
-	throw hf_exc();
-      }
+    for(const auto& statconf:statConfigs){
+      if( statconf.second.statHistPairs.size() > 0 ) {
+        
+        // Create the histogram of (binwise)
+        // stat uncertainties:
+        TH1* fracStatError = MakeScaledUncertaintyHist( statconf.second.statNodeName + "_RelErr", statconf.second.statHistPairs ); 
+        if( fracStatError == NULL ) {
+          std::cout << "Error: Failed to make ScaledUncertaintyHist for: " 
+                    << statconf.second.statNodeName << std::endl;
+          throw hf_exc();
+        }
       
       // Using this TH1* of fractinal stat errors, 
       // create a set of constraint terms:
-      ParamHistFunc* chanStatUncertFunc = (ParamHistFunc*) proto->function( statFuncName.c_str() );
+      ParamHistFunc* chanStatUncertFunc = (ParamHistFunc*) proto->function( statconf.second.statFuncName.c_str() );
       std::cout << "About to create Constraint Terms from: " 
 		<< chanStatUncertFunc->GetName()
 		<< " params: " << chanStatUncertFunc->paramList()
@@ -1780,17 +1789,12 @@ namespace HistFactory{
 							     *chanStatUncertFunc, fracStatError, 
 							     statConstraintType, 
 							     statRelErrorThreshold);
-
-
-      // clean stat hist pair (need to delete second histogram)
-      for (unsigned int i = 0; i < statHistPairs.size() ; ++i )  
-              delete statHistPairs[i].second;
-      
-       statHistPairs.clear(); 
-       //delete also histogram of stat uncertainties created in MakeScaledUncertaintyHist
+            
+      //delete also histogram of stat uncertainties created in MakeScaledUncertaintyHist
        delete fracStatError;
 
-    } // END: Loop over stat Hist Pairs
+      } // END: Loop over stat Hist Pairs
+    } // END: Loop over stat uncertainty stacks
     
     
     ///////////////////////////////////
@@ -2578,7 +2582,6 @@ namespace HistFactory{
 			     ParamHistFunc& paramHist, TH1* uncertHist, 
 			     Constraint::Type type, Double_t minSigma ) {
 
-
   // Take a RooArgList of RooAbsReal's and
   // create N constraint terms (one for
   // each gamma) whose relative uncertainty
@@ -2593,7 +2596,6 @@ namespace HistFactory{
   // type == 3 : LogNormal
 
   RooArgList ConstraintTerms;
-
   RooArgList paramSet = paramHist.paramList();
 
   // Must get the full size of the TH1
@@ -2628,7 +2630,7 @@ namespace HistFactory{
     // Get the sigma from the hist
     // (the relative uncertainty)
     Double_t sigma = uncertHist->GetBinContent( TH1BinNumber );
-
+    
     // If the sigma is <= 0, 
     // do cont create the term
     if( sigma <= 0 ){
@@ -2645,7 +2647,8 @@ namespace HistFactory{
     // set reasonable ranges for gamma parameters
     gamma.setMax( 1 + 5*sigma );
     //    gamma.setMin( TMath::Max(1. - 5*sigma, 0.) );    
-    gamma.setMin( 0. );         
+    gamma.setMin( 0. );
+    gamma.setError( sigma );             
 
     // Make Constraint Term
     std::string constrName = string(gamma.GetName()) + "_constraint";
