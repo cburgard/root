@@ -145,9 +145,11 @@ RooAbsData::RooAbsData(const char *name, const char *title, const RooArgSet& var
    RooAbsArg *var;
    while ((0 != (var = (RooAbsArg *)iter->Next()))) {
       if (!var->isFundamental()) {
-         coutE(InputArguments) << "RooAbsDataStore::initialize(" << GetName()
-                               << "): Data set cannot contain non-fundamental types, ignoring " << var->GetName()
-                               << endl;
+         // coutE(InputArguments) << "RooAbsDataStore::initialize(" << GetName()
+         //                       << "): Data set cannot contain non-fundamental types, ignoring " << var->GetName()
+         //                       << endl;
+        coutW(InputArguments) << "RooAbsData::ctor(" << GetName() << "): non-fundamental type in dataset: " << var->GetName() << endl ;
+         _vars.addClone(*var);
       } else {
          _vars.addClone(*var);
       }

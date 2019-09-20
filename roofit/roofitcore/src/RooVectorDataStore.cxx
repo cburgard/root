@@ -111,7 +111,11 @@ RooVectorDataStore::RooVectorDataStore(const char* name, const char* title, cons
   TIterator* iter = _varsww.createIterator() ;
   RooAbsArg* arg ;
   while((arg=(RooAbsArg*)iter->Next())) {
-    arg->attachToVStore(*this) ;
+    if (arg->isFundamental() || arg!=_wgtVar ) {
+      arg->attachToVStore(*this) ;
+    } else {
+      coutW(InputArguments) << "RooVectorDataStore::ctor(" << GetName() << ") non-fundemental weight object " << arg->GetName() << " not attached to data store." << endl ;
+    }
   }
   delete iter ;
   
@@ -169,7 +173,8 @@ RooArgSet RooVectorDataStore::varsNoWeight(const RooArgSet& allVars, const char*
 RooRealVar* RooVectorDataStore::weightVar(const RooArgSet& allVars, const char* wgtName) 
 {
   if(wgtName) {
-    RooRealVar* wgt = dynamic_cast<RooRealVar*>(allVars.find(wgtName)) ;
+    // WVE hack
+    RooRealVar* wgt = (RooRealVar*)dynamic_cast<RooAbsReal*>(allVars.find(wgtName)) ;
     return wgt ;
   } 
   return 0 ;

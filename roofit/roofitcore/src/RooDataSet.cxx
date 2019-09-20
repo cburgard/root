@@ -901,7 +901,9 @@ void RooDataSet::initialize(const char* wgtVarName)
 			  << wgtVarName << " not found in set of variables, no weighting will be assigned" << endl ;
     } else if (!dynamic_cast<RooRealVar*>(wgt)) {
       coutW(DataHandling) << "RooDataSet::RooDataSet(" << GetName() << ") WARNING: designated weight variable " 
-			  << wgtVarName << " is not of type RooRealVar, no weighting will be assigned" << endl ;
+                          << wgtVarName << " is not of type RooRealVar" << endl ;
+      _varsNoWgt.remove(*wgt) ;
+      _wgtVar = (RooRealVar*) wgt ;
     } else {
       _varsNoWgt.remove(*wgt) ;
       _wgtVar = (RooRealVar*) wgt ;
@@ -1148,10 +1150,15 @@ void RooDataSet::add(const RooArgSet& data, Double_t wgt, Double_t wgtError)
   _varsNoWgt = data;
 
   if (_wgtVar) {
-    _wgtVar->setVal(wgt) ;
-    if (wgtError!=0.) {
-      _wgtVar->setError(wgtError) ;
+
+    // WVE Hack for now
+    if (_wgtVar->isFundamental()) {
+      _wgtVar->setVal(wgt) ;
+      if (wgtError!=0.) {
+        _wgtVar->setError(wgtError) ;
+      }
     }
+
   } else if ((wgt != 1. || wgtError != 0.) && _errorMsgCount < 5) {
     ccoutE(DataHandling) << "An event weight/error was passed but no weight variable was defined"
         << " in the dataset '" << GetName() << "'. The weight will be ignored." << std::endl;
@@ -1170,8 +1177,8 @@ void RooDataSet::add(const RooArgSet& data, Double_t wgt, Double_t wgtError)
 
   fill();
 
-  // Restore weight state
-  if (_wgtVar) {
+  // Restore weight state (WVE hack also here)
+  if (_wgtVar && _wgtVar->isFundamental()) {
     _wgtVar->setVal(oldW);
     _wgtVar->removeError();
   }
@@ -1199,8 +1206,11 @@ void RooDataSet::add(const RooArgSet& indata, Double_t inweight, Double_t weight
 
   _varsNoWgt = indata;
   if (_wgtVar) {
-    _wgtVar->setVal(inweight) ;
-    _wgtVar->setAsymError(weightErrorLo,weightErrorHi) ;
+    // WVE hack
+    if (_wgtVar->isFundamental()) {
+      _wgtVar->setVal(inweight) ;
+      _wgtVar->setAsymError(weightErrorLo,weightErrorHi) ;
+    }
   } else if (inweight != 1. && _errorMsgCount < 5) {
     ccoutE(DataHandling) << "An event weight was given but no weight variable was defined"
         << " in the dataset '" << GetName() << "'. The weight will be ignored." << std::endl;
@@ -1217,8 +1227,8 @@ void RooDataSet::add(const RooArgSet& indata, Double_t inweight, Double_t weight
 
   fill();
 
-  // Restore weight state
-  if (_wgtVar) {
+  // Restore weight state (hack also here)
+  if (_wgtVar && _wgtVar->isFundamental()) {
     _wgtVar->setVal(oldW);
     _wgtVar->removeAsymError();
   }
@@ -1249,9 +1259,12 @@ void RooDataSet::addFast(const RooArgSet& data, Double_t wgt, Double_t wgtError)
 
   _varsNoWgt.assignFast(data,_dstore->dirtyProp());
   if (_wgtVar) {
-    _wgtVar->setVal(wgt) ;
-    if (wgtError!=0.) {
-      _wgtVar->setError(wgtError) ;
+    // WVE hack
+    if (_wgtVar->isFundamental()) {
+      _wgtVar->setVal(wgt) ;
+      if (wgtError!=0.) {
+        _wgtVar->setError(wgtError) ;
+      }
     }
   } else if (wgt != 1. && _errorMsgCount < 5) {
     ccoutE(DataHandling) << "An event weight was given but no weight variable was defined"
@@ -1273,7 +1286,7 @@ void RooDataSet::addFast(const RooArgSet& data, Double_t wgt, Double_t wgtError)
     _doWeightErrorCheck = false;
   }
 
-  if (_wgtVar) {
+  if (_wgtVar && _wgtVar->isFundamental()) {
     _wgtVar->setVal(oldW);
     _wgtVar->removeError();
   }
