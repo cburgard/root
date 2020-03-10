@@ -29,7 +29,7 @@ of degree n. \f$ \mathcal{N} \f$ is a normalisation constant that takes care of 
 cases where the \f$ c_i \f$ are not all equal to one.
 
 See also
-http://www.idav.ucdavis.edu/education/CAGDNotes/Bernstein-Polynomials.pdf
+[1] - http://www.idav.ucdavis.edu/education/CAGDNotes/Bernstein-Polynomials.pdf
 **/
 
 #include "RooBernstein.h"
@@ -47,7 +47,7 @@ ClassImp(RooBernstein);
 
 ////////////////////////////////////////////////////////////////////////////////
 
-RooBernstein::RooBernstein()
+RooBernstein::RooBernstein() : _refRangeName(nullptr)
 {
 }
 
@@ -58,7 +58,8 @@ RooBernstein::RooBernstein(const char* name, const char* title,
                            RooAbsReal& x, const RooArgList& coefList):
   RooAbsPdf(name, title),
   _x("x", "Dependent", this, x),
-  _coefList("coefficients","List of coefficients",this)
+  _coefList("coefficients","List of coefficients",this),
+  _refRangeName(nullptr)
 {
   TIterator* coefIter = coefList.createIterator() ;
   RooAbsArg* coef ;
@@ -78,16 +79,32 @@ RooBernstein::RooBernstein(const char* name, const char* title,
 RooBernstein::RooBernstein(const RooBernstein& other, const char* name) :
   RooAbsPdf(other, name),
   _x("x", this, other._x),
-  _coefList("coefList",this,other._coefList)
+  _coefList("coefList",this,other._coefList),
+  _refRangeName(other._refRangeName)
 {
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+
+void RooBernstein::selectNormalizationRange(const char* rangeName, Bool_t force)
+{
+  if (rangeName && (force || !_refRangeName)) {
+     _refRangeName = static_cast<const TNamed*> (RooNameReg::instance().constPtr(rangeName));
+  }
+  if (!rangeName) {
+     _refRangeName = nullptr;
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 Double_t RooBernstein::evaluate() const
 {
-  Double_t xmin = _x.min();
-  Double_t x = (_x - xmin) / (_x.max() - xmin); // rescale to [0,1]
+  const Double_t xmax = _x.max(_refRangeName?_refRangeName->GetName():0);
+  const Double_t xmin = _x.min(_refRangeName?_refRangeName->GetName():0);
+
+  Double_t x = (_x - xmin) / (xmax - xmin); // rescale to [0,1]
   Int_t degree = _coefList.getSize() - 1; // n+1 polys of degree n
   RooFIter iter = _coefList.fwdIterator();
 
@@ -207,12 +224,8 @@ RooSpan<double> RooBernstein::evaluateBatch(std::size_t begin, std::size_t batch
 ////////////////////////////////////////////////////////////////////////////////
 /// No analytical calculation available (yet) of integrals over subranges
 
-Int_t RooBernstein::getAnalyticalIntegral(RooArgSet& allVars, RooArgSet& analVars, const char* rangeName) const
+Int_t RooBernstein::getAnalyticalIntegral(RooArgSet& allVars, RooArgSet& analVars, const char*) const
 {
-  if (rangeName && strlen(rangeName)) {
-    return 0 ;
-  }
-
   if (matchArgs(allVars, analVars, _x)) return 1;
   return 0;
 }
@@ -222,24 +235,38 @@ Int_t RooBernstein::getAnalyticalIntegral(RooArgSet& allVars, RooArgSet& analVar
 Double_t RooBernstein::analyticalIntegral(Int_t code, const char* rangeName) const
 {
   R__ASSERT(code==1) ;
-  Double_t xmin = _x.min(rangeName); Double_t xmax = _x.max(rangeName);
-  Int_t degree= _coefList.getSize()-1; // n+1 polys of degree n
+  const Double_t xmax = _x.max(_refRangeName?_refRangeName->GetName():0);
+  const Double_t xmin = _x.min(_refRangeName?_refRangeName->GetName():0);
+  const Double_t xlo = (_x.min(rangeName) - xmin) / (xmax - xmin);
+  const Double_t xhi = (_x.max(rangeName) - xmin) / (xmax - xmin);
+  const Int_t degree= _coefList.getSize()-1; // n+1 polys of degree n
   Double_t norm(0) ;
-
   RooFIter iter = _coefList.fwdIterator() ;
   Double_t temp=0;
   for (int i=0; i<=degree; ++i){
     // for each of the i Bernstein basis polynomials
     // represent it in the 'power basis' (the naive polynomial basis)
     // where the integral is straight forward.
+    // [1] - a term in the power basis is given by,
+    //  B_{i,N}(t) = \sum_{j=i}^N (-1)^{j-i} * C(N,j) * C(j,i) * t^j, for 0 < t < 1
+    //  
+    //  where t = (x - xmin)/(xmax - xmin) is the re-scaled bernstein variable
+    //
+    //  the integral of the above term between x1, x2 is given by,
+    //
+    //  \int_x1^x2 B_{i,N}(x) dx = \sum_{j=i}^N (-1)^{j-i} * C(N,j) * C(j,i) *
+    //  	                   [(x2-xmin)^{j+1} - (x1-xmin)^{j+1}]/(j+1)(xmax-xmin)^j 
+    //                           = \sum_{j=1}^N (-1)^{j-i} * C(N,j) * C(j,i) *
+    //                             [ t2^{j+1} - t1^{j+1}]*(xmax-xmin)/(j+1)
+    //
+    //  where t1 and t2 are re-scaled bernstein values, (xlo and xhi in implementation)
     temp = 0;
     for (int j=i; j<=degree; ++j){ // power basis≈ß
-      temp += pow(-1.,j-i) * TMath::Binomial(degree, j) * TMath::Binomial(j,i) / (j+1);
+      temp += pow(-1.,j-i) * TMath::Binomial(degree, j) * TMath::Binomial(j,i) * (TMath::Power(xhi,j+1) - TMath::Power(xlo,j+1)) / (j+1);
     }
     temp *= ((RooAbsReal*)iter.next())->getVal(); // include coeff
     norm += temp; // add this basis's contribution to total
   }
-
   norm *= xmax-xmin;
   return norm;
 }
