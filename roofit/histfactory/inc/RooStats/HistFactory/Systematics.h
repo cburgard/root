@@ -336,11 +336,8 @@ public:
     void SetUseHisto( bool UseHisto=true ) { fUseHisto = UseHisto; }
     bool GetUseHisto() const { return fUseHisto; }
 
-    void SetInputFile( const std::string& InputFile ) { fInputFile = InputFile; }
-    std::string GetInputFile() { return fInputFile; }
- 
-    void SetStackLabel( const std::string& StackLabel ) { fStackLabel = StackLabel; }
-    std::string GetStackLabel() { return fStackLabel; }    
+    void SetInputFile( const std::string& InputFile ) { fInputFileHigh = InputFile; }
+    const std::string& GetInputFile() const { return fInputFileHigh; }
 
     void SetHistoName( const std::string& HistoName ) { fHistoNameHigh = HistoName; }
     const std::string& GetHistoName() const { return fHistoNameHigh; }
@@ -359,15 +356,7 @@ public:
   protected:
 
     bool fActivate;
-    bool fUseHisto; // Use an external histogram for the errors
-    std::string fStackLabel;
-    std::string fInputFile;
-    std::string fHistoName;
-    std::string fHistoPath;
-
-    // The histogram holding the error
-    HistRef fhError;
-
+    bool fUseHisto; // Use an external histogram for the errors 
   };
 
 /** \class StatErrorConfig
