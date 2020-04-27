@@ -294,9 +294,9 @@ void RooStats::HistFactory::StatError::PrintXML( std::ostream& xml ) const {
 
   if( GetActivate() ) {
     xml << "      <StatError Activate=\"" 
-	<< (GetActivate() ? std::string("True") : std::string("False"))  
+	<< std::string("True")  
 	<< "\" "
-	<< " InputFile=\"" << GetInputFile() << "\" "
+	<< " InputFile=\"" << fInputFile << "\" "
 	<< " HistoName=\"" << GetHistoName() << "\" "
 	<< " HistoPath=\"" << GetHistoPath() << "\" "
 	<< " /> " << std::endl;
