@@ -47,7 +47,7 @@ ClassImp(RooBernstein);
 
 ////////////////////////////////////////////////////////////////////////////////
 
-RooBernstein::RooBernstein()
+RooBernstein::RooBernstein() : _refRangeName(nullptr)
 {
 }
 
@@ -58,7 +58,8 @@ RooBernstein::RooBernstein(const char* name, const char* title,
                            RooAbsReal& x, const RooArgList& coefList):
   RooAbsPdf(name, title),
   _x("x", "Dependent", this, x),
-  _coefList("coefficients","List of coefficients",this)
+  _coefList("coefficients","List of coefficients",this),
+  _refRangeName(nullptr)
 {
   TIterator* coefIter = coefList.createIterator() ;
   RooAbsArg* coef ;
@@ -78,7 +79,8 @@ RooBernstein::RooBernstein(const char* name, const char* title,
 RooBernstein::RooBernstein(const RooBernstein& other, const char* name) :
   RooAbsPdf(other, name),
   _x("x", this, other._x),
-  _coefList("coefList",this,other._coefList)
+  _coefList("coefList",this,other._coefList),
+  _refRangeName(other._refRangeName)
 {
 }
 
