@@ -36,6 +36,7 @@
 #include <type_traits>
 #include <typeinfo>
 #include <vector>
+#include <unordered_map>
 
 class TObjArray;
 class TTree;
@@ -253,9 +254,9 @@ void BookFilterJit(const std::shared_ptr<RJittedFilter> &jittedFilter, void *pre
                    const ColumnNames_t &branches, const RDFInternal::RBookedCustomColumns &customCols, TTree *tree,
                    RDataSource *ds);
 
-void BookDefineJit(std::string_view name, std::string_view expression, RLoopManager &lm, RDataSource *ds,
-                   const std::shared_ptr<RJittedCustomColumn> &jittedCustomColumn,
-                   const RDFInternal::RBookedCustomColumns &customCols, const ColumnNames_t &branches);
+std::shared_ptr<RJittedCustomColumn> BookDefineJit(std::string_view name, std::string_view expression, RLoopManager &lm,
+                                                   RDataSource *ds, const RDFInternal::RBookedCustomColumns &customCols,
+                                                   const ColumnNames_t &branches);
 
 std::string JitBuildAction(const ColumnNames_t &bl, void *prevNode, const std::type_info &art, const std::type_info &at,
                            void *r, TTree *tree, const unsigned int nSlots,
@@ -295,8 +296,8 @@ void AddDSColumnsHelper(RLoopManager &lm, std::string_view name, RDFInternal::RB
    auto getValue = [readers](unsigned int slot) { return *readers[slot]; };
    using NewCol_t = RCustomColumn<decltype(getValue), CustomColExtraArgs::Slot>;
 
-   auto newCol = std::make_shared<NewCol_t>(&lm, name, std::move(getValue), ColumnNames_t{}, nSlots, currentCols,
-                                            /*isDSColumn=*/true);
+   auto newCol = std::make_shared<NewCol_t>(&lm, name, ds.GetTypeName(name), std::move(getValue), ColumnNames_t{},
+                                            nSlots, currentCols, /*isDSColumn=*/true);
 
    lm.RegisterCustomColumn(newCol.get());
    currentCols.AddName(name);
@@ -336,9 +337,10 @@ void JitFilterHelper(F &&f, const ColumnNames_t &cols, std::string_view name,
                      std::shared_ptr<RJittedFilter> *jittedFilter, std::shared_ptr<PrevNode> *prevNodeOnHeap,
                      RDFInternal::RBookedCustomColumns *customColumns)
 {
+   using Callable_t = typename std::decay<F>::type;
    // mock Filter logic -- validity checks and Define-ition of RDataSource columns
-   using F_t = RFilter<F, PrevNode>;
-   using ColTypes_t = typename TTraits::CallableTraits<F>::arg_types;
+   using F_t = RFilter<Callable_t, PrevNode>;
+   using ColTypes_t = typename TTraits::CallableTraits<Callable_t>::arg_types;
    constexpr auto nColumns = ColTypes_t::list_size;
    RDFInternal::CheckFilter(f);
 
@@ -363,8 +365,9 @@ void JitDefineHelper(F &&f, const ColumnNames_t &cols, std::string_view name, RL
                      std::shared_ptr<RJittedCustomColumn> *jittedCustomCol,
                      RDFInternal::RBookedCustomColumns *customColumns)
 {
-   using NewCol_t = RCustomColumn<F, CustomColExtraArgs::None>;
-   using ColTypes_t = typename TTraits::CallableTraits<F>::arg_types;
+   using Callable_t = typename std::decay<F>::type;
+   using NewCol_t = RCustomColumn<Callable_t, CustomColExtraArgs::None>;
+   using ColTypes_t = typename TTraits::CallableTraits<Callable_t>::arg_types;
    constexpr auto nColumns = ColTypes_t::list_size;
 
    auto ds = lm->GetDataSource();
@@ -376,9 +379,13 @@ void JitDefineHelper(F &&f, const ColumnNames_t &cols, std::string_view name, RL
    // share data after it has lazily compiled the code. Here the data has been used and the memory can be freed.
    delete customColumns;
 
+   // will never actually be used (trumped by jittedCustomCol->GetTypeName()), but we set it to something meaningful
+   // to help devs debugging
+   const auto dummyType = "jittedCol_t";
    // use unique_ptr<RCustomColumnBase> instead of make_unique<NewCol_t> to reduce jit/compile-times
-   (*jittedCustomCol)->SetCustomColumn(
-      std::unique_ptr<RCustomColumnBase>(new NewCol_t(lm, name, std::forward<F>(f), cols, lm->GetNSlots(), newColumns)));
+   (*jittedCustomCol)
+      ->SetCustomColumn(std::unique_ptr<RCustomColumnBase>(
+         new NewCol_t(lm, name, dummyType, std::forward<F>(f), cols, lm->GetNSlots(), newColumns)));
 
    delete jittedCustomCol;
 }
@@ -538,6 +545,15 @@ struct IsDeque_t : std::false_type {};
 template <typename T>
 struct IsDeque_t<std::deque<T>> : std::true_type {};
 // clang-format on
+
+/// Return the static global map of expressions that have been jitted by RDF.
+/// It's used to check whether a given expression has already been jitted, and
+/// to look up its associated variable name if it is.
+/// Keys in the map are the body of the expression, values are the name of the
+/// jitted variable that corresponds to that expression. For example, for:
+///     auto lambda1 = [] { return 42; };
+/// key would be "[] { return 42; }" and value would be "lambda1".
+std::unordered_map<std::string, std::string> &GetJittedExprs();
 
 } // namespace RDF
 } // namespace Internal
