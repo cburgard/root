@@ -14,7 +14,8 @@
 #define ROO_BERNSTEIN
 
 #include "RooAbsPdf.h"
-#include "RooRealProxy.h"
+#include "RooTemplateProxy.h"
+#include "RooRealVar.h"
 #include "RooListProxy.h"
 
 class RooRealVar;
@@ -36,9 +37,9 @@ public:
 void selectNormalizationRange(const char* rangeName=0, Bool_t force=kFALSE) ;
 
 private:
-
-  RooRealProxy _x;
+  
   RooListProxy _coefList ;
+  RooTemplateProxy<RooRealVar> _x ;
   std::string _refRangeName ;
 
   Double_t evaluate() const;
