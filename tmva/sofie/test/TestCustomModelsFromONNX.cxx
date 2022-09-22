@@ -33,6 +33,15 @@
 #include "Cast_FromONNX.hxx"
 #include "input_models/references/Cast.ref.hxx"
 
+#include "ReduceMean_FromONNX.hxx"
+#include "input_models/references/ReduceMean.ref.hxx"
+
+#include "ReduceProd_FromONNX.hxx"
+#include "input_models/references/ReduceProd.ref.hxx"
+
+#include "Shape_FromONNX.hxx"
+#include "input_models/references/Shape.ref.hxx"
+
 #include "LinearWithLeakyRelu_FromONNX.hxx"
 #include "input_models/references/LinearWithLeakyRelu.ref.hxx"
 
@@ -68,6 +77,9 @@
 
 #include "MaxPool3d_FromONNX.hxx"
 #include "input_models/references/MaxPool3d.ref.hxx"
+
+#include "Max_FromONNX.hxx"
+#include "input_models/references/Max.ref.hxx"
 
 #include "AvgPool_FromONNX.hxx"
 #include "input_models/references/AvgPool.ref.hxx"
@@ -128,6 +140,33 @@
 
 #include "GRUSeqLength_FromONNX.hxx"
 #include "input_models/references/GRUSeqLength.ref.hxx"
+
+#include "Softmax1d_FromONNX.hxx"
+#include "input_models/references/Softmax1d.ref.hxx"
+
+#include "Softmax2d_FromONNX.hxx"
+#include "input_models/references/Softmax2d.ref.hxx"
+
+#include "Softmax3d_FromONNX.hxx"
+#include "input_models/references/Softmax3d.ref.hxx"
+
+#include "Softmax4d_FromONNX.hxx"
+#include "input_models/references/Softmax4d.ref.hxx"
+
+#include "ConvTranspose1d_FromONNX.hxx"
+#include "input_models/references/ConvTranspose1d.ref.hxx"
+
+#include "ConvTranspose2d_FromONNX.hxx"
+#include "input_models/references/ConvTranspose2d.ref.hxx"
+
+#include "ConvTranspose3d_FromONNX.hxx"
+#include "input_models/references/ConvTranspose3d.ref.hxx"
+
+#include "ConvTransposeBias2d_FromONNX.hxx"
+#include "input_models/references/ConvTransposeBias2d.ref.hxx"
+
+#include "ConvTransposeBias2dBatched_FromONNX.hxx"
+#include "input_models/references/ConvTransposeBias2dBatched.ref.hxx"
 
 #include "gtest/gtest.h"
 
@@ -781,6 +820,100 @@ TEST(ONNX, Pow_broadcast){
 
 }
 
+   TEST(ONNX, ReduceMean){
+   constexpr float TOLERANCE = DEFAULT_TOLERANCE;
+
+   // Preparing the standard  input
+   std::vector<float> input({
+      5, 2, 3,
+      5, 5, 4
+   });
+   
+   TMVA_SOFIE_ReduceMean::Session s("ReduceMean_FromONNX.dat");
+   std::vector<float> output = s.infer(input.data());
+   // Checking output size
+   EXPECT_EQ(output.size(), sizeof(ReduceMean_ExpectedOutput::output) / sizeof(float));
+   
+   float *correct = ReduceMean_ExpectedOutput::output;
+
+   // Checking every output value, one by one
+   for (size_t i = 0; i < output.size(); ++i) {
+      EXPECT_LE(std::abs(output[i] - correct[i]), TOLERANCE);
+   }
+
+}
+
+   TEST(ONNX, ReduceProd){
+   constexpr float TOLERANCE = DEFAULT_TOLERANCE;
+
+   // Preparing the standard  input
+   std::vector<float> input({
+      5, 2, 3,
+      5, 5, 4
+   });
+   
+   TMVA_SOFIE_ReduceProd::Session s("ReduceProd_FromONNX.dat");
+   std::vector<float> output = s.infer(input.data());
+   // Checking output size
+   EXPECT_EQ(output.size(), sizeof(ReduceProd_ExpectedOutput::output) / sizeof(float));
+   
+   float *correct = ReduceProd_ExpectedOutput::output;
+
+   // Checking every output value, one by one
+   for (size_t i = 0; i < output.size(); ++i) {
+      EXPECT_LE(std::abs(output[i] - correct[i]), TOLERANCE);
+   }
+
+}
+
+TEST(ONNX, Max)
+   {
+      constexpr float TOLERANCE = DEFAULT_TOLERANCE;
+
+      // Preparing the standard input
+      std::vector<float> input1({
+         1.0,  2.0, -1.0
+      });
+      std::vector<float> input2({
+         3.0, 0.0, 4.0
+      });
+      TMVA_SOFIE_Max::Session s("Max_FromONNX.dat");
+
+      std::vector<float> output = s.infer(input1.data(),input2.data());
+
+      // Checking output size
+      EXPECT_EQ(output.size(), sizeof(Max_ExpectedOutput::outputs) / sizeof(float));
+
+      float *correct = Max_ExpectedOutput::outputs;
+
+      // Checking every output value, one by one
+      for (size_t i = 0; i < output.size(); ++i) {
+         EXPECT_LE(std::abs(output[i] - correct[i]), TOLERANCE);
+      }
+   }
+
+TEST(ONNX, Shape){
+   constexpr float TOLERANCE = DEFAULT_TOLERANCE;
+
+   // Preparing the standard  input
+   std::vector<float> input({
+      1, 2
+   });
+   
+   TMVA_SOFIE_Shape::Session s("Shape_FromONNX.dat");
+   auto output = s.infer(input.data());
+   // Checking output size
+   EXPECT_EQ(output.size(), sizeof(Shape_ExpectedOutput::outputs) / sizeof(float));
+   
+   int *correct = Shape_ExpectedOutput::outputs;
+
+   // Checking every output value, one by one
+   for (size_t i = 0; i < output.size(); ++i) {
+      EXPECT_LE(std::abs(output[i] - correct[i]), TOLERANCE);
+   }
+
+}
+
 TEST(ONNX, RNNBatchwise)
 {
    constexpr float TOLERANCE = DEFAULT_TOLERANCE;
@@ -1352,3 +1485,190 @@ TEST(ONNX, GRUSeqLength)
       EXPECT_LE(std::abs(output_yh[i] - correct_yh[i]), TOLERANCE);
    }
 }
+
+TEST(ONNX, Softmax1d)
+{
+   constexpr float TOLERANCE = DEFAULT_TOLERANCE;
+
+   std::vector<float> input({-1., 0., 1.});
+   TMVA_SOFIE_Softmax1d::Session s("Softmax1d_FromONNX.dat");
+   std::vector<float> output(s.infer(input.data()));
+
+   EXPECT_EQ(output.size(), sizeof(Softmax1d_ExpectedOutput::output) / sizeof(float));
+
+   float *correct = Softmax1d_ExpectedOutput::output;
+
+   // Checking every output value, one by one
+   for (size_t i = 0; i < output.size(); ++i) {
+      EXPECT_LE(std::abs(output[i] - correct[i]), TOLERANCE);
+   }
+}
+
+TEST(ONNX, Softmax2d)
+{
+   constexpr float TOLERANCE = DEFAULT_TOLERANCE;
+
+   std::vector<float> input({-1., 0., 1.});
+   TMVA_SOFIE_Softmax2d::Session s("Softmax2d_FromONNX.dat");
+   std::vector<float> output(s.infer(input.data()));
+
+   EXPECT_EQ(output.size(), sizeof(Softmax2d_ExpectedOutput::output) / sizeof(float));
+
+   float *correct = Softmax2d_ExpectedOutput::output;
+
+   // Checking every output value, one by one
+   for (size_t i = 0; i < output.size(); ++i) {
+      EXPECT_LE(std::abs(output[i] - correct[i]), TOLERANCE);
+   }
+}
+
+TEST(ONNX, Softmax3d)
+{
+   constexpr float TOLERANCE = DEFAULT_TOLERANCE;
+
+   std::vector<float> input({
+        -0.8939, -0.3674,  0.1763,  1.5804, -0.4687,  1.2253, -1.3488, -0.1000,
+        -0.1262,  0.4962,  1.0870,  0.6905, -0.3451, -1.6981, -0.4688,  0.4468,
+        -0.5479,  0.0650,  1.0446, -1.6249, -0.7190, -1.7520,  3.7753, -1.4939});
+   TMVA_SOFIE_Softmax3d::Session s("Softmax3d_FromONNX.dat");
+   std::vector<float> output(s.infer(input.data()));
+
+   EXPECT_EQ(output.size(), sizeof(Softmax3d_ExpectedOutput::output) / sizeof(float));
+
+   float *correct = Softmax3d_ExpectedOutput::output;
+
+   // Checking every output value, one by one
+   for (size_t i = 0; i < output.size(); ++i) {
+      EXPECT_LE(std::abs(output[i] - correct[i]), TOLERANCE);
+   }
+}
+
+TEST(ONNX, Softmax4d)
+{
+   constexpr float TOLERANCE = DEFAULT_TOLERANCE;
+
+   std::vector<float> input({
+        -0.5869, -1.4272, -0.1546,  0.0096,  0.1706,  0.0388, -0.3484, -0.7829,
+         1.1138, -0.5644, -0.6264, -1.1890,  1.6741, -0.7130,  0.9592,  1.7477,
+        -0.4775,  1.3407, -0.3882, -0.4560,  1.0385, -0.1669,  0.5540, -1.0790,
+        -0.6153, -0.6274, -1.2304, -0.6757,  1.0178, -0.2379, -0.7912, -0.0165,
+        -0.5423,  0.1459,  1.3585, -0.5005, -0.2187, -1.8181, -0.6642,  0.0287,
+        -1.9103,  0.7984, -0.7860,  1.5134,  1.3873, -0.6462, -0.6354, -0.1335});
+   TMVA_SOFIE_Softmax4d::Session s("Softmax4d_FromONNX.dat");
+   std::vector<float> output(s.infer(input.data()));
+
+   EXPECT_EQ(output.size(), sizeof(Softmax4d_ExpectedOutput::output) / sizeof(float));
+
+   float *correct = Softmax4d_ExpectedOutput::output;
+
+   // Checking every output value, one by one
+   for (size_t i = 0; i < output.size(); ++i) {
+      EXPECT_LE(std::abs(output[i] - correct[i]), TOLERANCE);
+   }
+}
+
+TEST(ONNX, ConvTranspose1d)
+{
+   constexpr float TOLERANCE = DEFAULT_TOLERANCE;
+
+   // Preparing the standard all-ones input
+   std::vector<float> input(3);
+   std::iota(input.begin(), input.end(), 0.0f);
+   TMVA_SOFIE_ConvTranspose1d::Session s("ConvTranspose1d_FromONNX.dat");
+   auto output = s.infer(input.data());
+
+   // Checking output size
+   EXPECT_EQ(output.size(), sizeof(ConvTranspose1d_ExpectedOutput::output) / sizeof(float));
+
+   float *correct = ConvTranspose1d_ExpectedOutput::output;
+
+   // Checking every output value, one by one
+   for (size_t i = 0; i < output.size(); ++i) {
+      EXPECT_LE(std::abs(output[i] - correct[i]), TOLERANCE);
+   }
+}
+
+TEST(ONNX, ConvTranspose2d)
+{
+   constexpr float TOLERANCE = DEFAULT_TOLERANCE;
+
+   // Preparing the standard all-ones input
+   std::vector<float> input(9);
+   std::iota(input.begin(), input.end(), 0.0f);
+   TMVA_SOFIE_ConvTranspose2d::Session s("ConvTranspose2d_FromONNX.dat");
+   std::vector<float> output(s.infer(input.data()));
+
+   // Checking output size
+   EXPECT_EQ(output.size(), sizeof(ConvTranspose2d_ExpectedOutput::output) / sizeof(float));
+
+   float *correct = ConvTranspose2d_ExpectedOutput::output;
+
+   // Checking every output value, one by one
+   for (size_t i = 0; i < output.size(); ++i) {
+      EXPECT_LE(std::abs(output[i] - correct[i]), TOLERANCE);
+   }
+}
+
+TEST(ONNX, ConvTranspose3d)
+{
+   constexpr float TOLERANCE = DEFAULT_TOLERANCE;
+
+   // Preparing the standard all-ones input
+   std::vector<float> input(8);
+   std::iota(input.begin(), input.end(), 0.0f);
+   TMVA_SOFIE_ConvTranspose3d::Session s("ConvTranspose3d_FromONNX.dat");
+   std::vector<float> output(s.infer(input.data()));
+
+   // Checking output size
+   EXPECT_EQ(output.size(), sizeof(ConvTranspose3d_ExpectedOutput::output) / sizeof(float));
+
+   float *correct = ConvTranspose3d_ExpectedOutput::output;
+
+   // Checking every output value, one by one
+   for (size_t i = 0; i < output.size(); ++i) {
+      EXPECT_LE(std::abs(output[i] - correct[i]), TOLERANCE);
+   }
+}
+
+TEST(ONNX, ConvTransposeBias2d)
+{
+   constexpr float TOLERANCE = DEFAULT_TOLERANCE;
+
+   // Preparing the standard all-ones input
+   std::vector<float> input(9);
+   std::iota(input.begin(), input.end(), 0.0f);
+   TMVA_SOFIE_ConvTransposeBias2d::Session s("ConvTransposeBias2d_FromONNX.dat");
+   std::vector<float> output(s.infer(input.data()));
+
+   // Checking output size
+   EXPECT_EQ(output.size(), sizeof(ConvTransposeBias2d_ExpectedOutput::output) / sizeof(float));
+
+   float *correct = ConvTransposeBias2d_ExpectedOutput::output;
+
+   // Checking every output value, one by one
+   for (size_t i = 0; i < output.size(); ++i) {
+      EXPECT_LE(std::abs(output[i] - correct[i]), TOLERANCE);
+   }
+}
+
+TEST(ONNX, ConvTransposeBias2dBatched)
+{
+   constexpr float TOLERANCE = DEFAULT_TOLERANCE;
+
+   // Preparing the standard all-ones input
+   std::vector<float> input(18);
+   std::iota(input.begin(), input.end(), 0.0f);
+   TMVA_SOFIE_ConvTransposeBias2dBatched::Session s("ConvTransposeBias2dBatched_FromONNX.dat");
+   std::vector<float> output(s.infer(input.data()));
+
+   // Checking output size
+   EXPECT_EQ(output.size(), sizeof(ConvTransposeBias2dBatched_ExpectedOutput::output) / sizeof(float));
+
+   float *correct = ConvTransposeBias2dBatched_ExpectedOutput::output;
+
+   // Checking every output value, one by one
+   for (size_t i = 0; i < output.size(); ++i) {
+      EXPECT_LE(std::abs(output[i] - correct[i]), TOLERANCE);
+   }
+}
+

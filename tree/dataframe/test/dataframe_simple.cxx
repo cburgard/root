@@ -727,12 +727,51 @@ TEST_P(RDFSimpleTests, StandardDeviationEmpty)
    EXPECT_DOUBLE_EQ(*stdDev, 0);
 }
 
+/*
+/// This test was deactivated because it is not possible to Sum Strings using a Kahan Sum.
+/// The reason is that there is no minus operator for that case. 
 TEST(RDFSimpleTests, SumOfStrings)
 {
    auto df = RDataFrame(2).Define("str", []() -> std::string { return "bla"; });
    EXPECT_EQ(*df.Sum<std::string>("str"), "blabla");
 }
+*/
 
+TEST_P(RDFSimpleTests, KahanSum_Double)
+{
+   constexpr std::uint64_t N = 10e7;
+   ROOT::RDataFrame d(N);
+   auto df = d.Define("x", "double(rdfentry_ +1)");
+   double true_sum = (N + 1.0) / 2.0;
+   EXPECT_DOUBLE_EQ(*df.Sum<double>({"x"}) / N, true_sum);
+}
+
+TEST_P(RDFSimpleTests, KahanSum_Float)
+{
+   constexpr std::uint64_t N = 10e7;
+   ROOT::RDataFrame d(N);
+   auto df = d.Define("x", "float(rdfentry_ +1)");
+   float true_sum = (N + 1.0) / 2.0;
+   EXPECT_FLOAT_EQ(*df.Sum<float>({"x"}) / N, true_sum);
+}
+
+TEST_P(RDFSimpleTests, KahanMean_Double)
+{
+   constexpr std::uint64_t N = 10e7;
+   ROOT::RDataFrame d(N);
+   auto df = d.Define("x", "double(rdfentry_ +1)");
+   double true_sum = (N + 1.0) / 2.0;
+   EXPECT_DOUBLE_EQ(*df.Mean<double>({"x"}), true_sum);
+}
+
+TEST_P(RDFSimpleTests, KahanMean_Float)
+{
+   constexpr std::uint64_t N = 10e7;
+   ROOT::RDataFrame d(N);
+   auto df = d.Define("x", "float(rdfentry_ +1)");
+   float true_sum = (N + 1.0) / 2.0;
+   EXPECT_FLOAT_EQ(*df.Mean<float>({"x"}), true_sum);
+}
 
 TEST(RDFSimpleTests, GenVector)
 {

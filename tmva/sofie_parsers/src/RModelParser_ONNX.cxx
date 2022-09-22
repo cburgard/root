@@ -1,9 +1,11 @@
 #include "TMVA/RModelParser_ONNX.hxx"
 #include "onnx_proto3.pb.h"
 
+#include <stdexcept>
 #include <string>
 #include <memory>
 #include <cassert>
+#include <iostream>
 
 namespace TMVA{
 namespace Experimental{
@@ -17,16 +19,30 @@ std::unique_ptr<ROperator> make_ROperator(size_t i, const onnx::GraphProto& grap
    auto find = mapOptypeOperator.find(nodeproto.op_type());
    // operator_type = nodeproto.op_type();
    if(nodeproto.op_type()=="MatMul"){
+      // Fuse MatMul and Add
       int idx2 = (nodes.size() > i+1) ? nodes[i+1] : (int) i + 1;
       if(idx2 < graphproto.node_size() && graphproto.node(idx2).op_type()=="Add"){
          //std::cout << "\tcreating Gemm from MatMul+Add " << std::endl;
          return make_ROperator_GemmFromMatMulandAdd(graphproto.node(idx),graphproto.node(idx2),graphproto,tensor_type);
       }
+   } else if (nodeproto.op_type() == "Conv" || nodeproto.op_type() == "ConvTranspose") {
+      // Fuse Conv or ConvTranspose without bias and Add
+      int j = (nodes.size() > i + 1) ? nodes[i+1] : (int) i + 1;
+      if (j < graphproto.node_size() && graphproto.node(j).op_type() == "Add") {
+         if (nodeproto.op_type() == "Conv") {
+            return make_ROperator_FuseConvAdd(graphproto.node(idx), graphproto.node(j), graphproto, tensor_type);
+         } else {
+            return make_ROperator_FuseConvTransposeAdd(graphproto.node(idx), graphproto.node(j), graphproto, tensor_type);
+         }
+      }
    }
+
    // skip then the following Add
    if(idx > 0 && nodeproto.op_type()=="Add"){
       int idx0 = (nodes.size() > i) ? nodes[i-1] : (int) i - 1;
       if (graphproto.node(idx0).op_type()=="MatMul" )
+         return std::unique_ptr<ROperator>();
+      else if (graphproto.node(idx0).op_type() == "ConvTranspose")
          return std::unique_ptr<ROperator>();
    }
 
@@ -36,6 +52,85 @@ std::unique_ptr<ROperator> make_ROperator(size_t i, const onnx::GraphProto& grap
       //std::cout << "\tcreating operator " << nodeproto.op_type() << " input name " << nodeproto.input(0) << std::endl;
       return (find->second)(nodeproto, graphproto, tensor_type);
    }
+}
+
+std::unique_ptr<ROperator> make_ROperator_FuseConvAdd(const onnx::NodeProto& /*convnode*/, const onnx::NodeProto& /*addnode*/,
+   const onnx::GraphProto& /*graphproto*/, std::unordered_map<std::string, ETensorType>& /*tensor_type*/) {
+   std::unique_ptr<ROperator> op;
+   return op;
+}
+
+std::unique_ptr<ROperator> make_ROperator_FuseConvTransposeAdd(const onnx::NodeProto& convnode, const onnx::NodeProto& addnode, const onnx::GraphProto& /*graphproto*/, std::unordered_map<std::string, ETensorType>& tensor_type) {
+   // Output of ConvTranspose must be the input of Add
+   if (convnode.output(0) != addnode.input(0)) {
+      throw
+         std::runtime_error("Cannot fuse ConvTranspose and Add operators");
+   }
+
+   // input type of ConvTranspose
+   ETensorType input_type;
+   auto input_name = convnode.input(0);
+   auto it = tensor_type.find(input_name);
+   if (it != tensor_type.end()) {
+      input_type = it->second;
+   } else {
+      throw
+          std::runtime_error("TMVA::SOFIE ONNX Parser ConvTranspose op has input tensor " + input_name + " but its type is not yet registered");
+   }
+
+   std::unique_ptr<ROperator> op;
+
+   std::string attr_auto_pad = "NOTSET";
+   std::vector<size_t> attr_dilations;
+   size_t attr_group = 0;
+   std::vector<size_t> attr_kernel_shape;
+   std::vector<size_t> attr_output_padding;
+   std::vector<size_t> attr_output_shape;
+   std::vector<size_t> attr_pads;
+   std::vector<size_t> attr_strides;
+
+   for (int_t i = 0; i < convnode.attribute_size(); i++) {
+      std::string attribute_name = convnode.attribute(i).name();
+      if (attribute_name == "auto_pad") {
+         attr_auto_pad = convnode.attribute(i).s();
+      } else if (attribute_name == "dilations") {
+         attr_dilations = std::vector<size_t>({convnode.attribute(i).ints().begin(), convnode.attribute(i).ints().end()});
+      } else if (attribute_name == "group") {
+         attr_group= convnode.attribute(i).i();
+      } else if (attribute_name == "kernel_shape") {
+         attr_kernel_shape = std::vector<size_t>({convnode.attribute(i).ints().begin(), convnode.attribute(i).ints().end()});
+      } else if (attribute_name == "output_padding") {
+         attr_output_padding = std::vector<size_t>({convnode.attribute(i).ints().begin(), convnode.attribute(i).ints().end()});
+      } else if (attribute_name == "output_shape") {
+         attr_output_shape = std::vector<size_t>({convnode.attribute(i).ints().begin(), convnode.attribute(i).ints().end()});
+      } else if (attribute_name == "pads") {
+         attr_pads = std::vector<size_t>({convnode.attribute(i).ints().begin(), convnode.attribute(i).ints().end()});
+      } else if (attribute_name == "strides") {
+         attr_strides = std::vector<size_t>({convnode.attribute(i).ints().begin(), convnode.attribute(i).ints().end()});
+      } else {
+         std::cout << "TMVA::SOFIE Warning - Model Loading - Attribute " << attribute_name << " in OperatorNode " << convnode.name() << " is not defined in ONNX IR and not applied!\n";
+      }
+   }
+
+   std::string name_b = addnode.input(1);
+   switch(input_type) {
+      case ETensorType::FLOAT:
+         op.reset(new ROperator_ConvTranspose<float>(attr_auto_pad, attr_dilations, attr_group, attr_kernel_shape, attr_output_padding,
+            attr_output_shape, attr_pads, attr_strides, convnode.input(0), convnode.input(1), name_b, addnode.output(0)));
+         break;
+      default:
+         throw
+            std::runtime_error("TMVA::SOFIE - Unsupported - Operator ConvTranspose does not yet support input type " + std::to_string(static_cast<int>(input_type)));
+   }
+
+   // Output of ConvTranspose and input of Add must be have the same type
+   ETensorType output_type = (op->TypeInference({input_type, input_type}))[0];
+   auto it2 = tensor_type.find(addnode.output(0));
+   if (it2 == tensor_type.end()) {
+      tensor_type[addnode.output(0)] = output_type;
+   }
+
+   return op;
 }
 
 template<EBasicBinaryOperator Op1>
@@ -116,6 +211,57 @@ std::unique_ptr<ROperator> make_ROperator_Neg(const onnx::NodeProto& nodeproto, 
    return op;
 }
 
+template<EReduceOpMode Op1>
+std::unique_ptr<ROperator> make_ROperator_Reduce(const onnx::NodeProto& nodeproto, const onnx::GraphProto& /*graphproto*/, std::unordered_map<std::string, ETensorType>& tensor_type){
+
+   ETensorType input_type;
+
+   EReduceOpMode op_mode = InvalidReduceOp;
+
+   if (nodeproto.op_type() == "ReduceMean")
+      op_mode = ReduceMean;
+   else if (nodeproto.op_type() == "ReduceSumsquare")
+      op_mode = ReduceSumsquare;
+   else if (nodeproto.op_type() == "ReduceProd")
+      op_mode = ReduceProd;
+
+   assert(op_mode != InvalidReduceOp);
+
+   auto input_name =  nodeproto.input(0);
+   auto it = tensor_type.find(input_name);
+   if (it != tensor_type.end()){
+      input_type = it->second;
+   }else{
+      throw std::runtime_error("TMVA::SOFIE ONNX Parser Reduce  op has input tensor" + input_name + " but its type is not yet registered");
+   }
+
+   std::unique_ptr<ROperator> op;
+   int attr_keepdims = 1;
+   int attr_axis = 1;
+   for (int_t i = 0; i < nodeproto.attribute_size(); i++) {
+         std::string attribute_name = nodeproto.attribute(i).name();
+         if (attribute_name == "keepdims")
+            attr_keepdims = nodeproto.attribute(i).i();
+         if(attribute_name == "axis")
+            attr_axis = nodeproto.attribute(i).i();
+   }
+   switch(input_type){
+   case ETensorType::FLOAT:
+      op.reset(new ROperator_Reduce<float,Op1>(attr_keepdims,attr_axis,nodeproto.input(0), nodeproto.output(0)));
+      break;
+   default:
+      throw std::runtime_error("TMVA::SOFIE - Unsupported - Reduce Operator does not yet support input type " + std::to_string(static_cast<int>(input_type)));
+   }
+
+   ETensorType output_type = (op->TypeInference({input_type}))[0];
+   auto it2 = tensor_type.find(nodeproto.output(0));
+   if (it2 == tensor_type.end()){
+      tensor_type[nodeproto.output(0)] = output_type;
+   }
+
+   return op;
+}
+
 std::unique_ptr<ROperator> make_ROperator_Transpose(const onnx::NodeProto& nodeproto, const onnx::GraphProto& /*graphproto*/, std::unordered_map<std::string, ETensorType>& tensor_type){
 
    ETensorType input_type;
@@ -148,6 +294,45 @@ std::unique_ptr<ROperator> make_ROperator_Transpose(const onnx::NodeProto& nodep
       break;
    default:
       throw std::runtime_error("TMVA::SOFIE - Unsupported - Operator Transpose does not yet support input type " + std::to_string(static_cast<int>(input_type)));
+   }
+
+   ETensorType output_type = (op->TypeInference({input_type}))[0];
+   auto it2 = tensor_type.find(nodeproto.output(0));
+   if (it2 == tensor_type.end()){
+      tensor_type[nodeproto.output(0)] = output_type;
+   }
+
+   return op;
+}
+
+
+std::unique_ptr<ROperator> make_ROperator_Max(const onnx::NodeProto& nodeproto, const onnx::GraphProto& /*graphproto */, std::unordered_map<std::string, ETensorType>& tensor_type){
+
+   ETensorType input_type = ETensorType::UNDEFINED;
+   std::vector<std::string> fInputNames;
+   for (int i = 0; i < nodeproto.input_size(); ++i) {
+      auto input_name = nodeproto.input(i);
+      auto it = tensor_type.find(input_name);
+      if (it != tensor_type.end()) {
+         if (i == 0)
+            input_type = it->second;
+         else
+            assert(it->second == input_type);
+      } else {
+         throw std::runtime_error("TMVA::SOFIE ONNX Parser Max op has input tensor" + input_name +
+                                  " but its type is not yet registered");
+      }
+      fInputNames.push_back(input_name);
+   }
+
+   std::unique_ptr<ROperator> op;
+
+   switch(input_type){
+   case ETensorType::FLOAT:
+      op.reset(new ROperator_Max<float>(fInputNames, nodeproto.output(0)));
+      break;
+   default:
+      throw std::runtime_error("TMVA::SOFIE - Unsupported - Operator Max does not yet support input type " + std::to_string(static_cast<int>(input_type)));
    }
 
    ETensorType output_type = (op->TypeInference({input_type}))[0];
@@ -384,8 +569,12 @@ std::unique_ptr<ROperator> make_ROperator_Softmax(const onnx::NodeProto &nodepro
 
    std::unique_ptr<ROperator> op;
 
+   int64_t attr_axis = -1;
+   if (nodeproto.attribute_size() == 1 && nodeproto.attribute(0).name() == "axis")
+      attr_axis = nodeproto.attribute(0).i();
+
    switch (input_type) {
-   case ETensorType::FLOAT: op.reset(new ROperator_Softmax<float>(nodeproto.input(0), nodeproto.output(0))); break;
+   case ETensorType::FLOAT: op.reset(new ROperator_Softmax<float>(attr_axis, nodeproto.input(0), nodeproto.output(0))); break;
    default:
       throw std::runtime_error("TMVA::SOFIE - Unsupported - Operator Softmax does not yet support input type " +
                                std::to_string(static_cast<int>(input_type)));
@@ -656,6 +845,77 @@ std::unique_ptr<ROperator> make_ROperator_Conv(const onnx::NodeProto& nodeproto,
       default:
          throw
             std::runtime_error("TMVA::SOFIE - Unsupported - Operator Conv does not yet support input type " + std::to_string(static_cast<int>(input_type)));
+   }
+
+   ETensorType output_type = (op->TypeInference({input_type, input_type}))[0];
+   auto it2 = tensor_type.find(nodeproto.output(0));
+   if (it2 == tensor_type.end()) {
+      tensor_type[nodeproto.output(0)] = output_type;
+   }
+
+   return op;
+}
+
+std::unique_ptr<ROperator> make_ROperator_ConvTranspose(const onnx::NodeProto& nodeproto, const onnx::GraphProto& /* graphproto */, std::unordered_map<std::string, ETensorType>& tensor_type) {
+
+   ETensorType input_type;
+
+   auto input_name = nodeproto.input(0);
+   auto it = tensor_type.find(input_name);
+   if (it != tensor_type.end()) {
+      input_type = it->second;
+   } else {
+      throw
+          std::runtime_error("TMVA::SOFIE ONNX Parser ConvTranspose op has input tensor " + input_name + " but its type is not yet registered");
+   }
+
+   std::unique_ptr<ROperator> op;
+
+   std::string attr_auto_pad = "NOTSET";
+   std::vector<size_t> attr_dilations;
+   size_t attr_group = 0;
+   std::vector<size_t> attr_kernel_shape;
+   std::vector<size_t> attr_output_padding;
+   std::vector<size_t> attr_output_shape;
+   std::vector<size_t> attr_pads;
+   std::vector<size_t> attr_strides;
+
+   for (int_t i = 0; i < nodeproto.attribute_size(); i++) {
+      std::string attribute_name = nodeproto.attribute(i).name();
+      if (attribute_name == "auto_pad") {
+         attr_auto_pad = nodeproto.attribute(i).s();
+      } else if (attribute_name == "dilations") {
+         attr_dilations = std::vector<size_t>({nodeproto.attribute(i).ints().begin(), nodeproto.attribute(i).ints().end()});
+      } else if (attribute_name == "group") {
+         attr_group= nodeproto.attribute(i).i();
+      } else if (attribute_name == "kernel_shape") {
+         attr_kernel_shape = std::vector<size_t>({nodeproto.attribute(i).ints().begin(), nodeproto.attribute(i).ints().end()});
+      } else if (attribute_name == "output_padding") {
+         attr_output_padding = std::vector<size_t>({nodeproto.attribute(i).ints().begin(), nodeproto.attribute(i).ints().end()});
+      } else if (attribute_name == "output_shape") {
+         attr_output_shape = std::vector<size_t>({nodeproto.attribute(i).ints().begin(), nodeproto.attribute(i).ints().end()});
+      } else if (attribute_name == "pads") {
+         attr_pads = std::vector<size_t>({nodeproto.attribute(i).ints().begin(), nodeproto.attribute(i).ints().end()});
+      } else if (attribute_name == "strides") {
+         attr_strides = std::vector<size_t>({nodeproto.attribute(i).ints().begin(), nodeproto.attribute(i).ints().end()});
+      } else {
+         std::cout << "TMVA::SOFIE Warning - Model Loading - Attribute " << attribute_name << " in OperatorNode " << nodeproto.name() << " is not defined in ONNX IR and not applied!\n";
+      }
+   }
+
+   std::string name_b = "";
+   if (nodeproto.input_size() > 2) {
+      name_b = nodeproto.input(2);
+   }
+
+   switch(input_type) {
+      case ETensorType::FLOAT:
+         op.reset(new ROperator_ConvTranspose<float>(attr_auto_pad, attr_dilations, attr_group, attr_kernel_shape, attr_output_padding,
+            attr_output_shape, attr_pads, attr_strides, nodeproto.input(0), nodeproto.input(1), name_b, nodeproto.output(0)));
+         break;
+      default:
+         throw
+            std::runtime_error("TMVA::SOFIE - Unsupported - Operator ConvTranspose does not yet support input type " + std::to_string(static_cast<int>(input_type)));
    }
 
    ETensorType output_type = (op->TypeInference({input_type, input_type}))[0];
@@ -1158,9 +1418,17 @@ std::unique_ptr<ROperator> make_ROperator_Concat(const onnx::NodeProto &nodeprot
 
    std::unique_ptr<ROperator> op;
 
-   int axis = nodeproto.attribute(0).i();
+   int attr_axis = 0;
+   int attr_new_axis = 0;
+   for (int_t i = 0; i < nodeproto.attribute_size(); i++) {
+      std::string attribute_name = nodeproto.attribute(i).name();
+      if (attribute_name == "axis")
+         attr_axis = nodeproto.attribute(i).i();
+      else if(attribute_name == "new_axis")
+         attr_new_axis = nodeproto.attribute(i).i();
+   }
    switch (input_type) {
-   case ETensorType::FLOAT: op.reset(new ROperator_Concat<float>(fInputs, axis, nodeproto.output(0))); break;
+   case ETensorType::FLOAT: op.reset(new ROperator_Concat<float>(fInputs, attr_axis, attr_new_axis, nodeproto.output(0))); break;
    default:
       throw std::runtime_error("TMVA::SOFIE - Unsupported - Operator Concat does not yet support input type " +
                                std::to_string(static_cast<int>(input_type)));
@@ -1209,6 +1477,39 @@ std::unique_ptr<ROperator> make_ROperator_Concat(const onnx::NodeProto &nodeprot
    ETensorType output_type = ConvertStringToType(attr_type);
    auto it2 = tensor_type.find(nodeproto.output(0));
    std::cout << nodeproto.output(0) << std::endl;
+   if (it2 == tensor_type.end()){
+      tensor_type[nodeproto.output(0)] = output_type;
+   }
+
+   return op;
+}
+
+std::unique_ptr<ROperator> make_ROperator_Shape(const onnx::NodeProto& nodeproto, const onnx::GraphProto& /*graphproto */, std::unordered_map<std::string, ETensorType>& tensor_type){
+
+   auto input_name =  nodeproto.input(0);
+   auto it = tensor_type.find(input_name);
+
+   if (it == tensor_type.end()){ 
+      throw std::runtime_error("TMVA::SOFIE ONNX Parser Shape op has input tensor" + input_name + " but its type is not yet registered"); 
+   }
+
+   std::unique_ptr<ROperator> op;
+
+   int attr_start = 0;
+   int attr_end = -1;
+
+   for (int_t i = 0; i < nodeproto.attribute_size(); i++) {
+         std::string attribute_name = nodeproto.attribute(i).name();
+         if (attribute_name == "start")
+            attr_start = nodeproto.attribute(i).i();
+         if (attribute_name == "end")
+            attr_end = nodeproto.attribute(i).i();
+   }
+
+   op.reset(new ROperator_Shape(attr_start, attr_end, nodeproto.input(0), nodeproto.output(0)));
+   
+   ETensorType output_type = ETensorType::INT64;
+   auto it2 = tensor_type.find(nodeproto.output(0));
    if (it2 == tensor_type.end()){
       tensor_type[nodeproto.output(0)] = output_type;
    }
@@ -1482,11 +1783,11 @@ RModel RModelParser_ONNX::Parse(std::string filename, bool verbose){
 
       if (op_type == "Gemm" || op_type == "MatMul") {
          rmodel.AddBlasRoutines({"Gemm", "Gemv"});
-      } else if (op_type == "Conv") {
+      } else if (op_type == "Conv" || op_type == "ConvTranspose") {
          rmodel.AddBlasRoutines({"Gemm", "Axpy"});
       } else if (op_type == "RNN") {
          rmodel.AddBlasRoutines({"Gemm", "Axpy"});
-      } else if (op_type == "Selu" || op_type == "Sigmoid" || op_type == "Pow" || op_type == "Tanh") {
+      } else if (op_type == "Selu" || op_type == "Sigmoid" || op_type == "Pow" || op_type == "Tanh" || op_type == "Max") {
          rmodel.AddNeededStdLib("cmath");
       } else if (op_type == "LSTM") {
          rmodel.AddBlasRoutines({"Gemm", "Axpy"});

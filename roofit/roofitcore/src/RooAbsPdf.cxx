@@ -1143,7 +1143,7 @@ RooAbsReal* RooAbsPdf::createNLL(RooAbsData& data, const RooLinkedList& cmdList)
     // Composite case: multiple ranges
     RooArgList nllList ;
     auto tokens = ROOT::Split(rangeName, ",");
-    if (RooHelpers::checkIfRangesOverlap(*this, data, tokens)) {
+    if (RooHelpers::checkIfRangesOverlap(*this, data, tokens, cfg.splitCutRange)) {
       throw std::runtime_error(
               std::string("Error in RooAbsPdf::createNLL! The ranges ") + rangeName + " are overlapping!");
     }
@@ -1253,7 +1253,7 @@ int RooAbsPdf::calcAsymptoticCorrectedCovariance(RooMinimizer &minimizer, RooAbs
       double prob = getVal(&obs);
       for (int k = 0; k < floated.getSize(); k++) {
          for (int l = 0; l < floated.getSize(); l++) {
-            num(k, l) += data.weight() * data.weight() * diffs[k] * diffs[l] / (prob * prob);
+            num(k, l) += data.weightSquared() * diffs[k] * diffs[l] / (prob * prob);
          }
       }
    }

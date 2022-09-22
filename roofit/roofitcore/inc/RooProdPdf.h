@@ -104,7 +104,7 @@ private:
   void computeBatch(cudaStream_t*, double* output, size_t nEvents, RooFit::Detail::DataMap const&) const override;
   inline bool canComputeBatchWithCuda() const override { return true; }
 
-  RooAbsReal* makeCondPdfRatioCorr(RooAbsReal& term, const RooArgSet& termNset, const RooArgSet& termImpSet, const char* normRange, const char* refRange) const ;
+  std::unique_ptr<RooAbsReal> makeCondPdfRatioCorr(RooAbsReal& term, const RooArgSet& termNset, const RooArgSet& termImpSet, const char* normRange, const char* refRange) const ;
 
   void getParametersHook(const RooArgSet* /*nset*/, RooArgSet* /*list*/, bool stripDisconnected) const override ;
 
@@ -166,17 +166,17 @@ private:
 
   mutable RooAICRegistry _genCode ; ///<! Registry of composite direct generator codes
 
-  double _cutOff ;       ///<  Cutoff parameter for running product
+  double _cutOff = 0.0;       ///<  Cutoff parameter for running product
   RooListProxy _pdfList ;  ///<  List of PDF components
   std::vector<std::unique_ptr<RooArgSet>> _pdfNSetList ; ///< List of PDF component normalization sets
-  Int_t _extendedIndex ;   ///<  Index of extended PDF (if any)
+  Int_t _extendedIndex = -1; ///<  Index of extended PDF (if any)
 
   void useDefaultGen(bool flag=true) { _useDefaultGen = flag ; }
-  bool _useDefaultGen ; ///< Use default or distributed event generator
+  bool _useDefaultGen = false; ///< Use default or distributed event generator
 
-  mutable TNamed* _refRangeName ; ///< Reference range name for interpretation of conditional products
+  mutable TNamed* _refRangeName = nullptr; ///< Reference range name for interpretation of conditional products
 
-  bool _selfNorm ; ///< Is self-normalized
+  bool _selfNorm = true; ///< Is self-normalized
   RooArgSet _defNormSet ; ///< Default normalization set
 
 private:

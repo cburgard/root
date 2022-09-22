@@ -15,7 +15,6 @@
 #include "ROOT/RDF/RFilterBase.hxx"
 #include "ROOT/RDF/RLoopManager.hxx"
 #include "ROOT/RDF/RRangeBase.hxx"
-#include "ROOT/RDF/RSlotStack.hxx"
 #include "ROOT/RDF/RVariationBase.hxx"
 #include "ROOT/RLogger.hxx"
 #include "RtypesCore.h" // Long64_t
@@ -33,6 +32,7 @@
 #ifdef R__USE_IMT
 #include "ROOT/TThreadExecutor.hxx"
 #include "ROOT/TTreeProcessorMT.hxx"
+#include "ROOT/RSlotStack.hxx"
 #endif
 
 #include <algorithm>
@@ -423,18 +423,20 @@ RLoopManager::RLoopManager(ROOT::RDF::Experimental::RDatasetSpec &&spec)
    }
 }
 
+#ifdef R__USE_IMT
 struct RSlotRAII {
-   RSlotStack &fSlotStack;
+   ROOT::Internal::RSlotStack &fSlotStack;
    unsigned int fSlot;
-   RSlotRAII(RSlotStack &slotStack) : fSlotStack(slotStack), fSlot(slotStack.GetSlot()) {}
+   RSlotRAII(ROOT::Internal::RSlotStack &slotStack) : fSlotStack(slotStack), fSlot(slotStack.GetSlot()) {}
    ~RSlotRAII() { fSlotStack.ReturnSlot(fSlot); }
 };
+#endif
 
 /// Run event loop with no source files, in parallel.
 void RLoopManager::RunEmptySourceMT()
 {
 #ifdef R__USE_IMT
-   RSlotStack slotStack(fNSlots);
+   ROOT::Internal::RSlotStack slotStack(fNSlots);
    // Working with an empty tree.
    // Evenly partition the entries according to fNSlots. Produce around 2 tasks per slot.
    const auto nEntriesPerSlot = fNEmptyEntries / (fNSlots * 2);
@@ -457,7 +459,7 @@ void RLoopManager::RunEmptySourceMT()
       auto slot = slotRAII.fSlot;
       RCallCleanUpTask cleanup(*this, slot);
       InitNodeSlots(nullptr, slot);
-      R__LOG_INFO(RDFLogChannel()) << LogRangeProcessing({"an empty source", range.first, range.second, slot});
+      R__LOG_DEBUG(0, RDFLogChannel()) << LogRangeProcessing({"an empty source", range.first, range.second, slot});
       try {
          UpdateSampleInfo(slot, range);
          for (auto currEntry = range.first; currEntry < range.second; ++currEntry) {
@@ -480,7 +482,7 @@ void RLoopManager::RunEmptySourceMT()
 void RLoopManager::RunEmptySource()
 {
    InitNodeSlots(nullptr, 0);
-   R__LOG_INFO(RDFLogChannel()) << LogRangeProcessing({"an empty source", 0, fNEmptyEntries, 0u});
+   R__LOG_DEBUG(0, RDFLogChannel()) << LogRangeProcessing({"an empty source", 0, fNEmptyEntries, 0u});
    RCallCleanUpTask cleanup(*this);
    try {
       UpdateSampleInfo(/*slot*/0, {0, fNEmptyEntries});
@@ -499,7 +501,7 @@ void RLoopManager::RunTreeProcessorMT()
 #ifdef R__USE_IMT
    if (fEndEntry == fBeginEntry) // empty range => no work needed
       return;
-   RSlotStack slotStack(fNSlots);
+   ROOT::Internal::RSlotStack slotStack(fNSlots);
    const auto &entryList = fTree->GetEntryList() ? *fTree->GetEntryList() : TEntryList();
    auto tp = (fBeginEntry != 0 || fEndEntry != std::numeric_limits<Long64_t>::max())
                 ? std::make_unique<ROOT::TTreeProcessorMT>(*fTree, fNSlots, std::make_pair(fBeginEntry, fEndEntry))
@@ -512,7 +514,7 @@ void RLoopManager::RunTreeProcessorMT()
       auto slot = slotRAII.fSlot;
       RCallCleanUpTask cleanup(*this, slot, &r);
       InitNodeSlots(&r, slot);
-      R__LOG_INFO(RDFLogChannel()) << LogRangeProcessing(TreeDatasetLogInfo(r, slot));
+      R__LOG_DEBUG(0, RDFLogChannel()) << LogRangeProcessing(TreeDatasetLogInfo(r, slot));
       const auto entryRange = r.GetEntriesRange(); // we trust TTreeProcessorMT to call SetEntriesRange
       const auto nEntries = entryRange.second - entryRange.first;
       auto count = entryCount.fetch_add(nEntries);
@@ -554,7 +556,7 @@ void RLoopManager::RunTreeReader()
 
    RCallCleanUpTask cleanup(*this, 0u, &r);
    InitNodeSlots(&r, 0);
-   R__LOG_INFO(RDFLogChannel()) << LogRangeProcessing(TreeDatasetLogInfo(r, 0u));
+   R__LOG_DEBUG(0, RDFLogChannel()) << LogRangeProcessing(TreeDatasetLogInfo(r, 0u));
 
    // recursive call to check filters and conditionally execute actions
    // in the non-MT case processing can be stopped early by ranges, hence the check on fNStopsReceived
@@ -590,7 +592,7 @@ void RLoopManager::RunDataSource()
          for (const auto &range : ranges) {
             const auto start = range.first;
             const auto end = range.second;
-            R__LOG_INFO(RDFLogChannel()) << LogRangeProcessing({fDataSource->GetLabel(), start, end, 0u});
+            R__LOG_DEBUG(0, RDFLogChannel()) << LogRangeProcessing({fDataSource->GetLabel(), start, end, 0u});
             for (auto entry = start; entry < end && fNStopsReceived < fNChildren; ++entry) {
                if (fDataSource->SetEntry(0u, entry)) {
                   RunAndCheckFilters(0u, entry);
@@ -612,7 +614,7 @@ void RLoopManager::RunDataSourceMT()
 {
 #ifdef R__USE_IMT
    assert(fDataSource != nullptr);
-   RSlotStack slotStack(fNSlots);
+   ROOT::Internal::RSlotStack slotStack(fNSlots);
    ROOT::TThreadExecutor pool;
 
    // Each task works on a subrange of entries
@@ -624,7 +626,7 @@ void RLoopManager::RunDataSourceMT()
       fDataSource->InitSlot(slot, range.first);
       const auto start = range.first;
       const auto end = range.second;
-      R__LOG_INFO(RDFLogChannel()) << LogRangeProcessing({fDataSource->GetLabel(), start, end, slot});
+      R__LOG_DEBUG(0, RDFLogChannel()) << LogRangeProcessing({fDataSource->GetLabel(), start, end, slot});
       try {
          for (auto entry = start; entry < end; ++entry) {
             if (fDataSource->SetEntry(slot, entry)) {
@@ -654,9 +656,8 @@ void RLoopManager::RunAndCheckFilters(unsigned int slot, Long64_t entry)
 {
    // data-block callbacks run before the rest of the graph
    if (fNewSampleNotifier.CheckFlag(slot)) {
-      for (auto &callback : fSampleCallbacks) {
-         callback(slot, fSampleInfos[slot]);
-      }
+      for (auto &callback : fSampleCallbacks)
+         callback.second(slot, fSampleInfos[slot]);
       fNewSampleNotifier.UnsetFlag(slot);
    }
 
@@ -802,7 +803,8 @@ void RLoopManager::Jit()
    RDFInternal::InterpreterCalc(code, "RLoopManager::Run");
    s.Stop();
    R__LOG_INFO(RDFLogChannel()) << "Just-in-time compilation phase completed"
-                                << (s.RealTime() > 1e-3 ? " in " + std::to_string(s.RealTime()) + " seconds." : ".");
+                                << (s.RealTime() > 1e-3 ? " in " + std::to_string(s.RealTime()) + " seconds."
+                                                        : " in less than 1ms.");
 }
 
 /// Trigger counting of number of children nodes for each node of the functional graph.
@@ -868,12 +870,14 @@ TTree *RLoopManager::GetTree() const
 void RLoopManager::Register(RDFInternal::RActionBase *actionPtr)
 {
    fBookedActions.emplace_back(actionPtr);
+   AddSampleCallback(actionPtr, actionPtr->GetSampleCallback());
 }
 
 void RLoopManager::Deregister(RDFInternal::RActionBase *actionPtr)
 {
    RDFInternal::Erase(actionPtr, fRunActions);
    RDFInternal::Erase(actionPtr, fBookedActions);
+   fSampleCallbacks.erase(actionPtr);
 }
 
 void RLoopManager::Register(RFilterBase *filterPtr)
@@ -909,6 +913,7 @@ void RLoopManager::Register(RDefineBase *ptr)
 void RLoopManager::Deregister(RDefineBase *ptr)
 {
    RDFInternal::Erase(ptr, fBookedDefines);
+   fSampleCallbacks.erase(ptr);
 }
 
 void RLoopManager::Register(RDFInternal::RVariationBase *v)
@@ -1042,30 +1047,32 @@ void RLoopManager::AddDataSourceColumnReaders(const std::string &col,
 // Differently from AddDataSourceColumnReaders, this can be called from multiple threads concurrently
 /// \brief Register a new RTreeColumnReader with this RLoopManager.
 /// \return A shared pointer to the inserted column reader.
-std::shared_ptr<RColumnReaderBase> RLoopManager::AddTreeColumnReader(unsigned int slot, const std::string &col,
-                                                                     std::unique_ptr<RColumnReaderBase> &&reader,
-                                                                     const std::type_info &ti)
+RColumnReaderBase *RLoopManager::AddTreeColumnReader(unsigned int slot, const std::string &col,
+                                                     std::unique_ptr<RColumnReaderBase> &&reader,
+                                                     const std::type_info &ti)
 {
    auto &readers = fDatasetColumnReaders[slot];
    const auto key = MakeDatasetColReadersKey(col, ti);
    // if a reader for this column and this slot was already there, we are doing something wrong
    assert(readers.find(key) == readers.end() || readers[key] == nullptr);
-   return readers[key] = std::move(reader);
+   auto *rptr = reader.get();
+   readers[key] = std::move(reader);
+   return rptr;
 }
 
-std::shared_ptr<RColumnReaderBase>
+RColumnReaderBase *
 RLoopManager::GetDatasetColumnReader(unsigned int slot, const std::string &col, const std::type_info &ti) const
 {
    const auto key = MakeDatasetColReadersKey(col, ti);
    auto it = fDatasetColumnReaders[slot].find(key);
    if (it != fDatasetColumnReaders[slot].end())
-      return it->second;
+      return it->second.get();
    else
       return nullptr;
 }
 
-void RLoopManager::AddSampleCallback(SampleCallback_t &&callback)
+void RLoopManager::AddSampleCallback(void *nodePtr, SampleCallback_t &&callback)
 {
    if (callback)
-      fSampleCallbacks.emplace_back(std::move(callback));
+      fSampleCallbacks.insert({nodePtr, std::move(callback)});
 }
