@@ -86,6 +86,7 @@ public:
    struct Config {
 
       std::string observableName;
+      RooRealVar* observable = 0;
       std::string fileName;
       ParamMap paramCards;
       FlagMap flagValues;

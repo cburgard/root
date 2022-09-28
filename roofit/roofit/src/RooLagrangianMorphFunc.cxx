@@ -1726,7 +1726,16 @@ void RooLagrangianMorphFunc::readParameters(TDirectory *f)
 
 void RooLagrangianMorphFunc::collectInputs(TDirectory *file)
 {
-   std::string obsName = _config.observableName;
+   std::string obsName;
+   if(_config.observable){
+     _observables.add(*_config.observable);
+     if(_config.observableName.empty()){
+       obsName = _observables.at(0)->GetName();
+     } else {
+       obsName = _config.observableName;
+     }
+   }
+   
    cxcoutP(InputArguments) << "initializing physics inputs from file " << file->GetName() << " with object name(s) '"
                            << obsName << "'" << std::endl;
    auto folderNames = _config.folderNames;
@@ -1738,10 +1747,10 @@ void RooLagrangianMorphFunc::collectInputs(TDirectory *file)
    }
    std::string classname = obj->ClassName();
    TClass *mode = TClass::GetClass(obj->ClassName());
-
-   RooRealVar *observable = this->setupObservable(obsName.c_str(), mode, obj.get());
+   this->setupObservable(obsName.c_str(), mode, obj.get());
+   
    if (classname.find("TH1") != std::string::npos) {
-      collectHistograms(this->GetName(), file, _sampleMap, _physics, *observable, obsName, _config.paramCards);
+      collectHistograms(this->GetName(), file, _sampleMap, _physics, *static_cast<RooRealVar*>(_observables.at(0)), obsName, _config.paramCards);
    } else if (classname.find("RooHistFunc") != std::string::npos ||
               classname.find("RooParamHistFunc") != std::string::npos ||
               classname.find("PiecewiseInterpolation") != std::string::npos) {
