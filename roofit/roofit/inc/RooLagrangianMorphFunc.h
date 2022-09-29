@@ -98,6 +98,7 @@ public:
       std::vector<RooArgList *> vertices;
       std::vector<std::vector<const char *>> nonInterfering;
       bool allowNegativeYields = true;
+      bool normalize = false;
    };
 
    RooLagrangianMorphFunc();
