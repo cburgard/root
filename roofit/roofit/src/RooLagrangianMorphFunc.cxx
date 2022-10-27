@@ -1751,7 +1751,8 @@ void RooLagrangianMorphFunc::collectInputs(TDirectory *file)
    }
    std::string classname = obj->ClassName();
    TClass *mode = TClass::GetClass(obj->ClassName());
-   this->setupObservable(obsName.c_str(), mode, obj.get());
+   RooAbsReal* observable = this->setupObservable(obsName.c_str(), mode, obj.get());
+   _lastNSet->add(*observable);
    
    if (classname.find("TH1") != std::string::npos) {
       collectHistograms(this->GetName(), file, _sampleMap, _physics, *static_cast<RooRealVar*>(_observables.at(0)), obsName, _config.paramCards, _config.normalize);
