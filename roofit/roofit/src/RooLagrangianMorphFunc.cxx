@@ -1752,7 +1752,7 @@ void RooLagrangianMorphFunc::collectInputs(TDirectory *file)
    std::string classname = obj->ClassName();
    TClass *mode = TClass::GetClass(obj->ClassName());
    RooAbsReal* observable = this->setupObservable(obsName.c_str(), mode, obj.get());
-   _lastNSet->add(*observable);
+   //   _lastNSet->add(*observable);
    
    if (classname.find("TH1") != std::string::npos) {
       collectHistograms(this->GetName(), file, _sampleMap, _physics, *static_cast<RooRealVar*>(_observables.at(0)), obsName, _config.paramCards, _config.normalize);
@@ -2948,9 +2948,13 @@ std::list<double> *RooLagrangianMorphFunc::plotSamplingHint(RooAbsRealLValue &ob
 double RooLagrangianMorphFunc::evaluate() const
 {
    // call getVal on the internal function
-   RooRealSumFunc *pdf = this->getFunc();
+  const RooRealSumFunc *pdf = this->getFunc();
+  RooArgSet nSet;
+  for(auto& obs:_observables){
+    nSet.add(*obs);
+  }
    if (pdf)
-      return _scale * pdf->getVal(_lastNSet);
+     return _scale * pdf->getVal(&nSet);
    else
       std::cerr << "unable to acquire in-built function!" << std::endl;
    return 0.;
